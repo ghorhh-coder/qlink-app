@@ -1,16 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
 export const runtime = "nodejs";
 
-const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY ||
-  "AQ.Ab8RN6Kj6Hzv_-3XXzQLWYJuYAInz03XY_DfU0QGRNdPNNTz_w";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
-const OPENROUTER_API_KEY =
-  process.env.OPENROUTER_API_KEY ||
-  "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";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 
 // --- IN-MEMORY CACHED APP GUIDE KNOWLEDGE BASE ---
 let cachedGuideSections: Record<string, string> | null = null;
@@ -518,3 +514,4 @@ Core Directives & Autonomous Swarm Action Engine:
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
