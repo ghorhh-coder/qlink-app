@@ -82,7 +82,9 @@ export async function GET(request: Request) {
         const parts = att.objectKey.split(",");
         const base64Str = parts.length > 1 ? parts[1] : parts[0];
         const buffer = Buffer.from(base64Str, "base64");
-        const mime = att.mimeType || "image/jpeg";
+        const dataMimeMatch = att.objectKey.match(/^data:([^;]+);base64,/);
+        const detectedMime = dataMimeMatch ? dataMimeMatch[1] : null;
+        const mime = att.mimeType || detectedMime || (att.kind === "video" ? "video/mp4" : "image/jpeg");
 
         const rangeHeader = request.headers.get("range");
         if (rangeHeader) {

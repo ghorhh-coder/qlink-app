@@ -32,6 +32,14 @@ const DDL_STATEMENTS = [
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
   );`,
   `CREATE INDEX IF NOT EXISTS "AttachmentLog_attachmentId_idx" ON "AttachmentLog"("attachmentId");`,
+  `CREATE TABLE IF NOT EXISTS "_attachment_chunks" (
+    "upload_id" TEXT NOT NULL,
+    "chunk_index" INT NOT NULL,
+    "data" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY ("upload_id", "chunk_index")
+  );`,
+  `CREATE INDEX IF NOT EXISTS "idx_attachment_chunks_upload_id" ON "_attachment_chunks"("upload_id");`,
 ];
 
 async function applyDdl(client: any, clientName: string): Promise<boolean> {

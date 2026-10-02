@@ -4718,6 +4718,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
   const [isHoveringAttach, setIsHoveringAttach] = useState(false);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [uploadProgressText, setUploadProgressText] = useState<string | null>(null);
 
   // Image preview + cropping before upload (for image attachments)
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
@@ -5337,46 +5338,234 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       return;
     }
 
-    // Non-image files or videos: keep existing behaviour (immediate upload)
-    const MAX_UPLOAD_LIMIT = 4.5 * 1024 * 1024; // 4.5MB Vercel limit
+    // Non-image files or videos: support direct-to-cloud signed and chunked uploads up to 45MB
+    const MAX_UPLOAD_LIMIT = 45 * 1024 * 1024; // 45MB limit (aligned with Supabase ceiling)
     if (selected.size > MAX_UPLOAD_LIMIT) {
-      setAttachmentError(`File is too large (${(selected.size / (1024 * 1024)).toFixed(1)}MB). Vercel server limit is 4.5MB.`);
+      setAttachmentError(`File is too large (${(selected.size / (1024 * 1024)).toFixed(1)}MB). Maximum limit is 45MB.`);
       return;
     }
 
     setIsUploadingAttachment(true);
+    setUploadProgressText("Preparing upload…");
     setAttachmentError(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", selected);
-      formData.append("kind", targetKind);
-      formData.append("toHandle", activePeerHandle);
+      // 1. Fast Path for small files <= 3.5MB: use single multipart upload
+      if (selected.size <= 3.5 * 1024 * 1024 && targetKind !== "video") {
+        const formData = new FormData();
+        formData.append("file", selected);
+        formData.append("kind", targetKind);
+        formData.append("toHandle", activePeerHandle);
 
-      const res = await fetch("/api/attachments/upload", {
-        method: "POST",
-        body: formData,
-      });
+        const res = await fetch("/api/attachments/upload", {
+          method: "POST",
+          body: formData,
+        });
 
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        if (res.status === 413) {
-          setAttachmentError("File is too large to upload. Vercel server limit is 4.5MB.");
-          return;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Unable to upload attachment.");
         }
-        setAttachmentError(data.error || "Unable to upload attachment.");
+
+        if (data.message) {
+          const fullMessage = {
+            ...data.message,
+            attachments: data.attachment
+              ? [
+                {
+                  ...data.attachment,
+                  sizeBytes: String(data.attachment.size),
+                },
+              ]
+              : [],
+          };
+          setChatMessages((prev) => {
+            if (prev.some((m) => m.id === fullMessage.id)) return prev;
+            return [...prev, fullMessage as ChatMessage];
+          });
+        }
         return;
       }
 
-      if (data.message) {
+      // 2. Large files / Videos (> 3.5MB or video):
+      // Check if Direct Supabase Signed Upload is available
+      let signedUploadSuccess = false;
+      try {
+        const signRes = await fetch("/api/attachments/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestSignedUrl: true,
+            toHandle: activePeerHandle,
+            filename: selected.name,
+            mimeType: selected.type,
+            size: selected.size,
+            kind: targetKind,
+          }),
+        });
+
+        const signData = await signRes.json().catch(() => ({}));
+        if (signRes.ok && signData.mode === "supabase" && signData.signedUrl) {
+          // Direct XHR upload to Supabase CDN (bypasses Vercel entirely)
+          setUploadProgressText("Uploading to cloud…");
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("PUT", signData.signedUrl);
+            xhr.setRequestHeader("Content-Type", selected.type || "application/octet-stream");
+            xhr.upload.onprogress = (evt) => {
+              if (evt.lengthComputable) {
+                const percent = Math.round((evt.loaded / evt.total) * 100);
+                setUploadProgressText(`Uploading ${targetKind === "video" ? "video" : "file"} (${percent}%)…`);
+              }
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                reject(new Error(`Signed upload status: ${xhr.status}`));
+              }
+            };
+            xhr.onerror = () => reject(new Error("Network error during signed upload"));
+            xhr.send(selected);
+          });
+
+          // Notify server that upload completed
+          setUploadProgressText("Finalizing message…");
+          const completeRes = await fetch("/api/attachments/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              uploadComplete: true,
+              toHandle: activePeerHandle,
+              kind: targetKind,
+              filename: selected.name,
+              mimeType: selected.type,
+              size: selected.size,
+              bucket: signData.bucket,
+              objectKey: signData.objectKey,
+            }),
+          });
+
+          const completeData = await completeRes.json().catch(() => ({}));
+          if (!completeRes.ok) {
+            throw new Error(completeData.error || "Failed to finalize attachment.");
+          }
+
+          if (completeData.message) {
+            const fullMessage = {
+              ...completeData.message,
+              attachments: completeData.attachment
+                ? [
+                  {
+                    ...completeData.attachment,
+                    sizeBytes: String(completeData.attachment.size),
+                  },
+                ]
+                : [],
+            };
+            setChatMessages((prev) => {
+              if (prev.some((m) => m.id === fullMessage.id)) return prev;
+              return [...prev, fullMessage as ChatMessage];
+            });
+          }
+          signedUploadSuccess = true;
+        }
+      } catch (signErr) {
+        console.warn("[upload] Signed direct upload note, switching to resilient chunked vault:", signErr);
+      }
+
+      if (signedUploadSuccess) return;
+
+      // 3. Resilient Chunked Vault Flow: Slices file into 2.5MB pieces to safely bypass Vercel 4.5MB ceiling
+      setUploadProgressText("Initializing resilient upload…");
+      const initRes = await fetch("/api/attachments/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initChunked: true,
+          toHandle: activePeerHandle,
+          filename: selected.name,
+          mimeType: selected.type,
+          size: selected.size,
+          kind: targetKind,
+        }),
+      });
+
+      const initData = await initRes.json().catch(() => ({}));
+      if (!initRes.ok || !initData.uploadId) {
+        throw new Error(initData.error || "Failed to initialize upload session.");
+      }
+
+      const uploadId = initData.uploadId;
+      const chunkSize = initData.chunkSize || 2.5 * 1024 * 1024;
+      const totalChunks = Math.ceil(selected.size / chunkSize);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(selected.size, start + chunkSize);
+        const chunkBlob = selected.slice(start, end);
+
+        // Convert slice to base64
+        const chunkBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const resStr = reader.result as string;
+            const b64 = resStr.includes(",") ? resStr.split(",")[1] : resStr;
+            resolve(b64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(chunkBlob);
+        });
+
+        const percent = Math.round(((i + 1) / totalChunks) * 100);
+        setUploadProgressText(`Uploading ${targetKind === "video" ? "video" : "file"} (${percent}%)…`);
+
+        const chunkRes = await fetch("/api/attachments/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uploadChunk: true,
+            uploadId,
+            chunkIndex: i,
+            data: chunkBase64,
+          }),
+        });
+
+        if (!chunkRes.ok) {
+          const chunkErrData = await chunkRes.json().catch(() => ({}));
+          throw new Error(chunkErrData.error || `Chunk ${i + 1}/${totalChunks} upload failed.`);
+        }
+      }
+
+      // Complete Chunked Upload
+      setUploadProgressText("Processing & delivering…");
+      const finishRes = await fetch("/api/attachments/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          completeChunked: true,
+          uploadId,
+          toHandle: activePeerHandle,
+          filename: selected.name,
+          mimeType: selected.type,
+          size: selected.size,
+          kind: targetKind,
+        }),
+      });
+
+      const finishData = await finishRes.json().catch(() => ({}));
+      if (!finishRes.ok) {
+        throw new Error(finishData.error || "Failed to complete upload.");
+      }
+
+      if (finishData.message) {
         const fullMessage = {
-          ...data.message,
-          attachments: data.attachment
+          ...finishData.message,
+          attachments: finishData.attachment
             ? [
               {
-                ...data.attachment,
-                sizeBytes: String(data.attachment.size),
+                ...finishData.attachment,
+                sizeBytes: String(finishData.attachment.size),
               },
             ]
             : [],
@@ -5386,10 +5575,12 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
           return [...prev, fullMessage as ChatMessage];
         });
       }
-    } catch {
-      setAttachmentError("Unable to upload attachment. Please try again.");
+    } catch (err: any) {
+      console.error("[upload] Upload error:", err);
+      setAttachmentError(err?.message || "Unable to upload attachment. Please try again.");
     } finally {
       setIsUploadingAttachment(false);
+      setUploadProgressText(null);
     }
   };
 
@@ -11499,6 +11690,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
               attachmentError={attachmentError}
               setAttachmentError={setAttachmentError}
               isUploadingAttachment={isUploadingAttachment}
+              uploadProgressText={uploadProgressText}
               isEditingImage={isEditingImage}
               handleCropComplete={handleCropComplete}
               handleCloseImageEditor={handleCloseImageEditor}
