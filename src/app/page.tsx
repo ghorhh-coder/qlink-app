@@ -1730,6 +1730,20 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
   useEffect(() => {
     if (activePeerHandle) {
       setUnreadMessages((prev) => markHandleAsRead(prev, activePeerHandle));
+      setIncoming((prev) =>
+        prev.map((r) =>
+          areHandlesEqual(r.fromUser?.handle, activePeerHandle)
+            ? { ...r, isUnread: false, unreadCount: 0 }
+            : r
+        )
+      );
+      setOutgoing((prev) =>
+        prev.map((r) =>
+          areHandlesEqual(r.toUser?.handle, activePeerHandle)
+            ? { ...r, isUnread: false, unreadCount: 0 }
+            : r
+        )
+      );
     }
   }, [activePeerHandle]);
 
@@ -7950,6 +7964,25 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
     lastOnlineRef.current = null;
     initialScrollDoneRef.current = null;
 
+    // Immediately clear unread status for target peer from unread tracker and connection lists
+    setUnreadMessages((prev) => markHandleAsRead(prev, targetPeer));
+    setIncoming((prev) =>
+      prev.map((r) =>
+        areHandlesEqual(r.fromUser?.handle, targetPeer)
+          ? { ...r, isUnread: false, unreadCount: 0 }
+          : r
+      )
+    );
+    setOutgoing((prev) =>
+      prev.map((r) =>
+        areHandlesEqual(r.toUser?.handle, targetPeer)
+          ? { ...r, isUnread: false, unreadCount: 0 }
+          : r
+      )
+    );
+    incomingFriendsEtagRef.current = null;
+    outgoingFriendsEtagRef.current = null;
+
     // Instant SWR Cache Check & persistent Outbox merge (0ms display, zero message loss):
     const cacheKey = cleanHandle(targetPeer);
     const cached = peerMessagesCacheRef.current.get(cacheKey) || [];
@@ -7990,6 +8023,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
 
       if (res.status === 304) {
         setChatLoading(false);
+        setUnreadMessages((prev) => markHandleAsRead(prev, targetPeer));
         return;
       }
 
@@ -10867,14 +10901,17 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                     // Outgoing accepted
                     for (const req of outgoing) {
                       if (req.status === "ACCEPTED" && req.toUser?.handle) {
-                        acceptedFriendsMap.set(req.toUser.handle.toLowerCase(), {
+                        const peerHandle = req.toUser.handle;
+                        const isCurrentActive = areHandlesEqual(peerHandle, activePeerHandle);
+                        const isUnread = !isCurrentActive && Boolean(req.isUnread) && isHandleUnread(unreadMessages, peerHandle);
+                        acceptedFriendsMap.set(peerHandle.toLowerCase(), {
                           id: req.id,
-                          peerHandle: req.toUser.handle,
+                          peerHandle,
                           peerName: req.toUser.name,
                           categories: req.categories || [],
                           direction: "outgoing",
                           status: req.status,
-                          isUnread: req.isUnread || isHandleUnread(unreadMessages, req.toUser.handle),
+                          isUnread,
                         });
                       }
                     }
@@ -10882,17 +10919,25 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                     // Incoming accepted
                     for (const req of incoming) {
                       if (req.status === "ACCEPTED" && req.fromUser?.handle) {
-                        const key = req.fromUser.handle.toLowerCase();
+                        const peerHandle = req.fromUser.handle;
+                        const key = peerHandle.toLowerCase();
+                        const isCurrentActive = areHandlesEqual(peerHandle, activePeerHandle);
+                        const isItemUnread = !isCurrentActive && Boolean(req.isUnread) && isHandleUnread(unreadMessages, peerHandle);
                         if (!acceptedFriendsMap.has(key)) {
                           acceptedFriendsMap.set(key, {
                             id: req.id,
-                            peerHandle: req.fromUser.handle,
+                            peerHandle,
                             peerName: req.fromUser.name,
                             categories: req.categories || [],
                             direction: "incoming",
                             status: req.status,
-                            isUnread: req.isUnread || isHandleUnread(unreadMessages, req.fromUser.handle),
+                            isUnread: isItemUnread,
                           });
+                        } else {
+                          const existing = acceptedFriendsMap.get(key);
+                          if (existing && !isItemUnread) {
+                            existing.isUnread = false;
+                          }
                         }
                       }
                     }

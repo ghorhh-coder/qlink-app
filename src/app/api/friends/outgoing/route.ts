@@ -169,7 +169,8 @@ export async function GET(request: Request) {
     // High-Efficiency RFC 9110 ETag Generation for Outgoing Requests:
     const firstReq = allRequests[0];
     const lastReq = allRequests[allRequests.length - 1];
-    const outDigest = `out-${allRequests.length}-${firstReq?.id || "0"}-${lastReq?.id || "0"}-${firstReq?.lastInteractionAt || firstReq?.updatedAt || ""}-${fromUserId}`;
+    const unreadDigest = allRequests.map((r) => `${r.id}:${r.unreadCount || 0}`).join(",");
+    const outDigest = `out-${allRequests.length}-${firstReq?.id || "0"}-${lastReq?.id || "0"}-${firstReq?.lastInteractionAt || firstReq?.updatedAt || ""}-${fromUserId}-${unreadDigest}`;
     const outEtag = `W/"${Buffer.from(outDigest).toString("base64")}"`;
 
     const clientIfNoneMatch = request.headers.get("if-none-match");

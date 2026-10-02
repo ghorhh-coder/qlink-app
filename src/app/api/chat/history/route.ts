@@ -224,23 +224,26 @@ export async function GET(request: Request) {
       messages = rawMessages.reverse();
     }
 
-    // Auto-mark unread messages as READ
-    const unreadMessageIds = messages
-      .filter((m: any) => m.senderId === peer.id && m.status !== "READ")
-      .map((m: any) => m.id);
+    // Auto-mark ALL unread messages sent by peer as READ (await to ensure DB commit before response)
+    const now = new Date();
+    await prisma.message.updateMany({
+      where: {
+        senderId: peer.id,
+        OR: [
+          { roomId: roomId },
+          { roomId: `dm:${roomId}` },
+          { roomId: `dm:${peer.id}:${meId}` },
+          { roomId: `dm:${meId}:${peer.id}` },
+        ],
+        status: { in: ["SENT", "DELIVERED"] },
+      },
+      data: { status: "READ", readAt: now, deliveredAt: now },
+    }).catch((err) => console.warn("[chat/history] Failed to mark read:", err));
 
-    if (unreadMessageIds.length > 0) {
-      const now = new Date();
-      prisma.message.updateMany({
-        where: { id: { in: unreadMessageIds } },
-        data: { status: "READ", readAt: now, deliveredAt: now },
-      }).catch(() => {});
-
-      for (const m of messages) {
-        if (m.senderId === peer.id && m.status !== "READ") {
-          m.status = "READ";
-          (m as any).readAt = now.toISOString();
-        }
+    for (const m of messages) {
+      if (m.senderId === peer.id && m.status !== "READ") {
+        m.status = "READ";
+        (m as any).readAt = now.toISOString();
       }
     }
 
