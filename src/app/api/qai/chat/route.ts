@@ -332,13 +332,12 @@ Core Directives & Autonomous Swarm Action Engine:
     const completeSystemInstruction =
       systemPrompt + friendContextPrompt + guideContextPrompt;
 
-    // --- 4. TIER 1: GOOGLE GEMINI (Prioritize the cheapest models: 1.5-Flash-8B, 2.0-Flash-Lite, 1.5-Flash) ---
+    // --- 4. TIER 1: GOOGLE GEMINI 3 SERIES (Primary: gemini-3.5-flash-lite [Cheapest], Fallbacks: gemini-3.8-flash, gemini-3.5-flash) ---
     if (GEMINI_API_KEY) {
       const geminiModels = [
-        "gemini-1.5-flash-8b",   // The absolute cheapest Gemini model ($0.0375 / 1M tokens)
-        "gemini-2.0-flash-lite", // Ultra-fast lightweight 2.0 model
-        "gemini-1.5-flash",      // High-availability standard flash
-        "gemini-2.0-flash",
+        "gemini-3.5-flash-lite", // The verified cheapest modern model
+        "gemini-3.8-flash",      // Next-gen high capability flash
+        "gemini-3.5-flash",      // High-speed reliable fallback
       ];
       for (const model of geminiModels) {
         try {
