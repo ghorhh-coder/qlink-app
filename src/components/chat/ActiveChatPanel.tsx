@@ -1593,6 +1593,12 @@ export const ActiveChatPanel = memo(function ActiveChatPanel(props: ActiveChatPa
                             kind: string,
                             id?: string,
                           ) => {
+                            if (objectKey?.startsWith("/api/media/stream")) {
+                              return objectKey;
+                            }
+                            if (id && (kind === "video" || bucket === "database")) {
+                              return `/api/media/stream?id=${encodeURIComponent(id)}`;
+                            }
                             if (bucket === "local" || objectKey?.startsWith("/uploads/")) {
                               return objectKey;
                             }
@@ -1973,20 +1979,29 @@ export const ActiveChatPanel = memo(function ActiveChatPanel(props: ActiveChatPa
 
                                           if (isVid) {
                                             return (
-                                              <div key={a.id} className="space-y-1.5">
-                                                <div className="relative overflow-hidden rounded-xl sm:rounded-2xl border border-white/15 dark:border-white/10 bg-black/40 backdrop-blur-md">
+                                              <div key={a.id} className="space-y-1.5 w-full min-w-[240px] max-w-[340px] sm:max-w-[420px]">
+                                                <div className="relative group/vid overflow-hidden rounded-xl sm:rounded-2xl border border-white/20 dark:border-white/10 bg-black/90 shadow-[0_12px_36px_rgba(0,0,0,0.65)]">
+                                                  <video
+                                                    src={url}
+                                                    controls
+                                                    playsInline
+                                                    preload="metadata"
+                                                    className="max-h-72 w-full rounded-xl sm:rounded-2xl object-contain bg-black block"
+                                                  />
+                                                  {/* Top-Right Expand to Lightbox Button */}
                                                   <button
                                                     type="button"
-                                                    onClick={() => {
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
                                                       setLightboxVideoUrl(url);
                                                       setLightboxVideoName(a.originalName);
                                                     }}
-                                                    className="block w-full focus:outline-none focus:ring-2 focus:ring-cyan-400/80"
+                                                    title="Expand to Fullscreen"
+                                                    className="absolute top-2.5 right-2.5 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-black/80 text-cyan-300 backdrop-blur-md border border-white/25 hover:border-cyan-400 hover:bg-black hover:scale-105 active:scale-95 transition-all shadow-lg opacity-85 sm:opacity-0 group-hover/vid:opacity-100 cursor-pointer"
                                                   >
-                                                    <QuantumVideoPlayerComponent
-                                                      src={url}
-                                                      className="max-h-64 w-full rounded-xl"
-                                                    />
+                                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                                    </svg>
                                                   </button>
                                                 </div>
                                                 <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
@@ -2810,10 +2825,12 @@ export const ActiveChatPanel = memo(function ActiveChatPanel(props: ActiveChatPa
                           className="relative max-h-[90vh] max-w-5xl w-full"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <QuantumVideoPlayerComponent
+                          <video
                             src={lightboxVideoUrl}
-                            autoPlayMuted={false}
-                            className="max-h-[90vh] w-full rounded-2xl shadow-2xl"
+                            controls
+                            autoPlay
+                            playsInline
+                            className="max-h-[85vh] w-full rounded-2xl shadow-2xl object-contain bg-black"
                           />
                           <button
                             type="button"

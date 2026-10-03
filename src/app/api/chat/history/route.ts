@@ -282,7 +282,10 @@ export async function GET(request: Request) {
         mimeType: att.mimeType,
         sizeBytes: att.sizeBytes ? att.sizeBytes.toString() : "0",
         bucket: att.bucket,
-        objectKey: att.objectKey,
+        objectKey:
+          att.bucket === "database" || att.objectKey?.startsWith("data:")
+            ? `/api/media/stream?id=${att.id}`
+            : att.objectKey,
         createdAt: att.createdAt,
       };
       if (att.messageId) {

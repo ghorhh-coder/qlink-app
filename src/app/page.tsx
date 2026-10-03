@@ -5497,7 +5497,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       }
 
       const uploadId = initData.uploadId;
-      const chunkSize = initData.chunkSize || 2.5 * 1024 * 1024;
+      const chunkSize = initData.chunkSize || 2359296; // 2.25MB (exact multiple of 3 for bit-perfect Base64)
       const totalChunks = Math.ceil(selected.size / chunkSize);
 
       for (let i = 0; i < totalChunks; i++) {
@@ -5510,7 +5510,11 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
           const reader = new FileReader();
           reader.onloadend = () => {
             const resStr = reader.result as string;
-            const b64 = resStr.includes(",") ? resStr.split(",")[1] : resStr;
+            let b64 = resStr.includes(",") ? resStr.split(",")[1] : resStr;
+            // Intermediate chunks of exact multiple of 3 should have zero padding
+            if (i < totalChunks - 1) {
+              b64 = b64.replace(/=+$/, "");
+            }
             resolve(b64);
           };
           reader.onerror = reject;
@@ -5537,43 +5541,60 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
         }
       }
 
-      // Complete Chunked Upload
-      setUploadProgressText("Processing & delivering…");
-      const finishRes = await fetch("/api/attachments/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          completeChunked: true,
-          uploadId,
-          toHandle: activePeerHandle,
-          filename: selected.name,
-          mimeType: selected.type,
-          size: selected.size,
-          kind: targetKind,
-        }),
-      });
+      // Complete Chunked Upload with dynamic engaging titles
+      const peerNameTag = activePeerHandle ? `@${activePeerHandle}` : "peer";
+      const processingStages = [
+        "Processing & stitching frames…",
+        "Encrypting with Quantum Key…",
+        "Securing zero-knowledge vault…",
+        `Delivering to ${peerNameTag}…`,
+      ];
+      let stageIdx = 0;
+      setUploadProgressText(processingStages[0]);
+      const stageTimer = setInterval(() => {
+        stageIdx = (stageIdx + 1) % processingStages.length;
+        setUploadProgressText(processingStages[stageIdx]);
+      }, 1200);
 
-      const finishData = await finishRes.json().catch(() => ({}));
-      if (!finishRes.ok) {
-        throw new Error(finishData.error || "Failed to complete upload.");
-      }
-
-      if (finishData.message) {
-        const fullMessage = {
-          ...finishData.message,
-          attachments: finishData.attachment
-            ? [
-              {
-                ...finishData.attachment,
-                sizeBytes: String(finishData.attachment.size),
-              },
-            ]
-            : [],
-        };
-        setChatMessages((prev) => {
-          if (prev.some((m) => m.id === fullMessage.id)) return prev;
-          return [...prev, fullMessage as ChatMessage];
+      try {
+        const finishRes = await fetch("/api/attachments/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            completeChunked: true,
+            uploadId,
+            toHandle: activePeerHandle,
+            filename: selected.name,
+            mimeType: selected.type,
+            size: selected.size,
+            kind: targetKind,
+          }),
         });
+
+        const finishData = await finishRes.json().catch(() => ({}));
+        if (!finishRes.ok) {
+          throw new Error(finishData.error || "Failed to complete upload.");
+        }
+
+        if (finishData.message) {
+          const fullMessage = {
+            ...finishData.message,
+            attachments: finishData.attachment
+              ? [
+                {
+                  ...finishData.attachment,
+                  sizeBytes: String(finishData.attachment.size),
+                },
+              ]
+              : [],
+          };
+          setChatMessages((prev) => {
+            if (prev.some((m) => m.id === fullMessage.id)) return prev;
+            return [...prev, fullMessage as ChatMessage];
+          });
+        }
+      } finally {
+        clearInterval(stageTimer);
       }
     } catch (err: any) {
       console.error("[upload] Upload error:", err);

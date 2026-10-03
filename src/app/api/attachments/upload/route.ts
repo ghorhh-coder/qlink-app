@@ -22,7 +22,7 @@ function buildRoomId(a: string, b: string) {
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB for general files
 const MAX_VIDEO_BYTES = 45 * 1024 * 1024; // 45MB for videos
-const CHUNK_SIZE_BYTES = 2.5 * 1024 * 1024; // 2.5MB per chunk (safely bypasses Vercel 4.5MB limit)
+const CHUNK_SIZE_BYTES = 2359296; // 2.25MB (exact multiple of 3 for bit-perfect Base64 encoding without padding)
 
 const FILES_BUCKET = process.env.SUPABASE_FILES_BUCKET || "Autark-1";
 const VIDEOS_BUCKET = process.env.SUPABASE_VIDEOS_BUCKET || "Autark-2";
@@ -393,7 +393,7 @@ export async function POST(request: Request) {
             size: effectiveSize,
             mimeType: fileMime,
             bucket: "database",
-            objectKey: finalObjectKey,
+            objectKey: `/api/media/stream?id=${attachmentRecord?.id || uploadId}`,
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
           },
         });
