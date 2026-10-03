@@ -460,6 +460,56 @@ function CustomAudioPlayer(props: { src: string }) {
    fake text, exactly matching the real cards word-to-word.
    ========================================================================== */
 
+function QuantumDirectoryGlassShimmer() {
+  return (
+    <div className="space-y-1.5 pt-1.5 animate-in fade-in duration-300">
+      {[1, 2].map((idx) => (
+        <div
+          key={idx}
+          className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70 p-3.5 sm:p-4 shadow-lg backdrop-blur-md"
+        >
+          {/* Optical Shimmer Light Sweep */}
+          <div className="pointer-events-none absolute inset-0 -translate-x-full animate-[shimmer_1.8s_infinite] bg-gradient-to-r from-transparent via-cyan-400/10 to-transparent" />
+
+          <div className="flex items-start gap-3 min-w-0">
+            {/* Avatar Ghost */}
+            <div className="relative shrink-0 pt-0.5">
+              <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-slate-800/80 border border-white/10 animate-pulse" />
+              <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-cyan-500/40 border-2 border-slate-950" />
+            </div>
+
+            {/* Content Ghost */}
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  <div className="h-3.5 w-28 sm:w-36 rounded-full bg-slate-800/90 animate-pulse" />
+                  <div className="h-2.5 w-20 rounded-full bg-slate-800/60" />
+                </div>
+                <div className="h-7 w-16 sm:w-18 rounded-full border border-white/15 bg-white/10 shrink-0" />
+              </div>
+
+              {/* Bio line ghost */}
+              <div className="space-y-1 pt-0.5">
+                <div className="h-2.5 w-full max-w-[280px] rounded-full bg-slate-800/70" />
+                <div className="h-2 w-3/4 max-w-[200px] rounded-full bg-slate-800/50" />
+              </div>
+
+              {/* Footer Ghost */}
+              <div className="mt-2.5 flex items-center justify-between border-t border-slate-800/60 pt-2 text-[11px]">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-16 rounded-full bg-amber-500/20" />
+                  <div className="h-2 w-12 rounded-full bg-slate-800/50" />
+                </div>
+                <div className="h-2.5 w-14 rounded-full bg-cyan-400/20" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GlobalDirectoryIdsSkeleton() {
   return (
     <div className="space-y-3.5 animate-in fade-in duration-200">
@@ -3058,12 +3108,39 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
   const directoryScrollTopRef = useRef<number>(0);
   const [showDirectoryScrollToTop, setShowDirectoryScrollToTop] = useState(false);
 
+  const [directoryFastScrolling, setDirectoryFastScrolling] = useState(false);
+  const directoryFastScrollTimer = useRef<any>(null);
+  const directoryLastScrollTime = useRef<number>(0);
+  const directoryLastScrollPos = useRef<number>(0);
+
   const handleDirectoryScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const top = e.currentTarget.scrollTop;
+    const scrollHeight = e.currentTarget.scrollHeight;
+    const clientHeight = e.currentTarget.clientHeight;
     directoryScrollTopRef.current = top;
     try {
       sessionStorage.setItem("qc_directory_scroll", String(top));
     } catch {}
+
+    const now = Date.now();
+    const timeDiff = now - (directoryLastScrollTime.current || now);
+    const posDiff = top - (directoryLastScrollPos.current || top);
+
+    // Detect fast downward scrolling or near bottom
+    if (posDiff > 40 && timeDiff > 0 && timeDiff < 180) {
+      const velocity = posDiff / timeDiff; // px per ms
+      if (velocity > 0.7 && scrollHeight - (top + clientHeight) < 750) {
+        setDirectoryFastScrolling(true);
+        if (directoryFastScrollTimer.current) clearTimeout(directoryFastScrollTimer.current);
+        directoryFastScrollTimer.current = setTimeout(() => {
+          setDirectoryFastScrolling(false);
+        }, 800);
+      }
+    }
+
+    directoryLastScrollTime.current = now;
+    directoryLastScrollPos.current = top;
+
     if (top > 160) {
       if (!showDirectoryScrollToTop) setShowDirectoryScrollToTop(true);
     } else {
@@ -10117,6 +10194,36 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                                 </div>
                               );
                             })}
+
+                              {!showDirectoryMediaOnly && (
+                                <>
+                                  {/* Quantum Optical Glass Shimmer (active during fast/down scroll) */}
+                                  {directoryFastScrolling && (
+                                    <QuantumDirectoryGlassShimmer />
+                                  )}
+
+                                  {/* All Active Nodes Synced Milestone Card */}
+                                  <div className="mt-3 mb-2 flex flex-col items-center justify-center p-4 rounded-2xl border border-white/10 bg-slate-950/60 backdrop-blur-md text-center shadow-lg relative overflow-hidden">
+                                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-cyan-500/5 to-transparent" />
+                                    <span className="relative flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs mb-1.5 shadow-[0_0_12px_rgba(6,182,212,0.25)]">
+                                      ✨
+                                    </span>
+                                    <p className="relative text-[11px] font-bold text-slate-200 tracking-wide">
+                                      All Active Nodes Synced
+                                    </p>
+                                    <p className="relative text-[9.5px] text-slate-400 mt-0.5">
+                                      You're viewing all verified members on the quantum mesh
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={scrollToDirectoryTop}
+                                      className="relative mt-2.5 inline-flex items-center gap-1 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-[10px] font-semibold hover:bg-cyan-500/20 hover:border-cyan-400 transition-all active:scale-95 cursor-pointer"
+                                    >
+                                      Back to Top ↑
+                                    </button>
+                                  </div>
+                                </>
+                              )}
 
                               {/* Dedicated Content-First Media Feed (Media Active Mode) */}
                               {showDirectoryMediaOnly && (
