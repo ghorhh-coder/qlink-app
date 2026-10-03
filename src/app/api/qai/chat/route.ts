@@ -332,9 +332,14 @@ Core Directives & Autonomous Swarm Action Engine:
     const completeSystemInstruction =
       systemPrompt + friendContextPrompt + guideContextPrompt;
 
-    // --- 4. TIER 1: GOOGLE GEMINI (2.0-Flash with 1.5-Flash failover) ---
-    if (GEMINI_API_KEY && GEMINI_API_KEY.startsWith("AIzaSy")) {
-      const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
+    // --- 4. TIER 1: GOOGLE GEMINI (Prioritize the cheapest models: 1.5-Flash-8B, 2.0-Flash-Lite, 1.5-Flash) ---
+    if (GEMINI_API_KEY) {
+      const geminiModels = [
+        "gemini-1.5-flash-8b",   // The absolute cheapest Gemini model ($0.0375 / 1M tokens)
+        "gemini-2.0-flash-lite", // Ultra-fast lightweight 2.0 model
+        "gemini-1.5-flash",      // High-availability standard flash
+        "gemini-2.0-flash",
+      ];
       for (const model of geminiModels) {
         try {
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`;
