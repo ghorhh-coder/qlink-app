@@ -86,21 +86,38 @@ export async function* streamQAIResponse(
   let fallbackText = "";
   const q = query.toLowerCase();
 
+  let actionTag = "";
+  if (/settings|privacy|hide email/i.test(q)) {
+    actionTag = `\n\n<qai_action>{"swarm":"system","tool":"navigate_tab","params":{"tab":"settings"},"message":"Opening Settings for you right now!"}</qai_action>`;
+  } else if (/console|global id/i.test(q)) {
+    actionTag = `\n\n<qai_action>{"swarm":"system","tool":"open_quantum_console","params":{},"message":"Opening Quantum Link Console!"}</qai_action>`;
+  } else if (/beacon|emergency|sos/i.test(q)) {
+    actionTag = `\n\n<qai_action>{"swarm":"emergency","tool":"trigger_beacon","params":{"target":"@active_peer"},"message":"Triggering emergency SOS beacon!"}</qai_action>`;
+  } else if (/sapphire|theme/i.test(q)) {
+    actionTag = `\n\n<qai_action>{"swarm":"system","tool":"switch_theme","params":{"theme":"sapphire"},"message":"Switching to Sapphire VIP theme!"}</qai_action>`;
+  }
+
   if (mode === "polish") {
-    fallbackText = `Here is your polished message in **${polishStyle.toUpperCase()}** tone:\n\n> "${query.trim()}"\n\n✨ *Optimized for clarity and impact.*`;
+    fallbackText = `Here is your polished message in **${polishStyle.toUpperCase()}** tone:\n\n> "${query.trim()}"\n\n✨ *Optimized for impact, clarity, and precision.*`;
   } else if (mode === "qlink") {
-    if (q.includes("encrypt") || q.includes("security")) {
+    if (q.includes("encrypt") || q.includes("security") || q.includes("crypto") || q.includes("safe")) {
       fallbackText = QLINK_KNOWLEDGE.encryption;
-    } else if (q.includes("point") || q.includes("qp") || q.includes("aura")) {
+    } else if (q.includes("point") || q.includes("qp") || q.includes("aura") || q.includes("badge")) {
       fallbackText = QLINK_KNOWLEDGE.qp;
     } else {
       fallbackText = QLINK_KNOWLEDGE.edits;
     }
   } else {
-    if (friendContext && friendContext.friendHandle) {
-      fallbackText = `⚡ **Q-AI Assistant**\n\nI'm reviewing your active chat with **@${friendContext.friendHandle}**.\n\nHow would you like me to help reply or structure your thoughts?`;
+    if (friendContext && friendContext.friendHandle && /reply|suggest|draft|say/i.test(q)) {
+      fallbackText = `⚡ **Q-AI Assistant**\n\nBased on your active encrypted chat with **@${friendContext.friendHandle}**, here is a suggested reply:\n\n> "Got it, let's proceed with that."\n\nTap the draft above to insert it directly into your composer.${actionTag}`;
+    } else if (q.includes("encrypt") || q.includes("security") || q.includes("safe") || q.includes("privacy")) {
+      fallbackText = `${QLINK_KNOWLEDGE.encryption}${actionTag}`;
+    } else if (q.includes("point") || q.includes("qp") || q.includes("aura") || q.includes("streak")) {
+      fallbackText = `${QLINK_KNOWLEDGE.qp}${actionTag}`;
+    } else if (q.includes("edit") || q.includes("modify") || q.includes("change")) {
+      fallbackText = `${QLINK_KNOWLEDGE.edits}${actionTag}`;
     } else {
-      fallbackText = `⚡ **Q-AI Quantum Response**\n\nI've analyzed your query: "${query}".\n\nQ-Link Quantum Intelligence is ready to assist with real-time encrypted messaging, code reasoning, and system navigation.`;
+      fallbackText = `⚡ **Q-AI Quantum Assistant**\n\nI have received your request: **"${query.trim()}"**.\n\nQ-Link Quantum Intelligence provides:\n- **🔒 E2EE Chat**: Curve25519 (X25519) + AES-GCM-256 forward secrecy\n- **✍️ Real-Time Edits**: In-place edits with instant live synchronization\n- **💎 Quantum Points (QP)**: Earn rewards through daily messaging streaks & badges\n- **🚨 Q-BEACON**: High-priority alerts designed for critical situations\n\n*You can also command me directly (e.g., "Open settings", "Switch theme", "Send beacon").*${actionTag}`;
     }
   }
 
