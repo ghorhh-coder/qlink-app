@@ -65,8 +65,22 @@ export function buildNavUrl(state: QNavState): string {
     if (state.messageId) {
       params.set("messageId", state.messageId);
     }
-  } else if (state.screen === "profile" && state.handle) {
-    params.set("profile", state.handle);
+  } else if (state.screen === "idconsole") {
+    params.set("view", "profile");
+    if (state.handle) {
+      params.set("handle", state.handle);
+    }
+    if (state.tab) {
+      params.set("tab", state.tab);
+    }
+  } else if (state.screen === "profile") {
+    params.set("view", "profile");
+    if (state.handle) {
+      params.set("handle", state.handle);
+    }
+    if (state.tab) {
+      params.set("tab", state.tab);
+    }
   } else if (state.screen === "directory") {
     params.set("view", "directory");
     if (state.handle) {
@@ -98,6 +112,7 @@ export function parseCurrentNavState(): QNavState {
     const params = new URLSearchParams(window.location.search);
     const chat = params.get("chat");
     const profile = params.get("profile");
+    const handle = params.get("handle");
     const view = params.get("view");
     const tab = params.get("tab") || undefined;
     const messageId = params.get("messageId") || undefined;
@@ -113,12 +128,25 @@ export function parseCurrentNavState(): QNavState {
     }
     if (view) {
       const v = view.toLowerCase();
-      if (v === "directory") return { screen: "directory", tab };
+      if (v === "profile") {
+        const targetHandle = handle || profile;
+        if (targetHandle) {
+          return { screen: "profile", handle: targetHandle, tab };
+        }
+        return { screen: "idconsole", tab: tab || "my" };
+      }
+      if (v === "idconsole" || v === "console") {
+        const targetHandle = handle || profile;
+        if (targetHandle) {
+          return { screen: "profile", handle: targetHandle, tab };
+        }
+        return { screen: "idconsole", tab: tab || "my" };
+      }
+      if (v === "directory") return { screen: "directory", handle: handle || profile || undefined, tab };
       if (v === "settings") return { screen: "settings" };
       if (v === "qai") return { screen: "qai" };
       if (v === "notifications" || v === "notifs") return { screen: "notifications" };
       if (v === "store" || v === "rewards" || v === "points") return { screen: "store" };
-      if (v === "idconsole" || v === "console") return { screen: "idconsole" };
       if (v === "editprofile") return { screen: "editprofile" };
       if (v === "verify") return { screen: "verify" };
       if (v === "lightbox") return { screen: "lightbox" };

@@ -4577,6 +4577,9 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
         return;
       }
 
+      const createData = await createRes.json().catch(() => ({}));
+      const createdPost = createData?.post;
+
       setPostTextDraft("");
       setPostMediaFile(null);
       setPostMediaKind(null);
@@ -4590,6 +4593,37 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       }
       setIdConsoleLocalPreviewUrl(null);
       setIdConsolePostStatus("Posted.");
+
+      // Invalidate ETags and offline caches immediately so fresh data loads
+      offlineCache.invalidate(CACHE_KEYS.DIR_POSTS);
+      offlineCache.invalidate(CACHE_KEYS.ID_POSTS);
+      dirPostsEtagRef.current = null;
+      idConsolePostsEtagRef.current = null;
+
+      // Optimistically insert post into state for 0ms visual responsiveness
+      if (createdPost) {
+        const optimisticPost = {
+          ...createdPost,
+          author: createdPost.author || {
+            id: (session?.user as any)?.id,
+            handle: (session?.user as any)?.handle || "user",
+            name: (session?.user as any)?.name || "Verified User",
+            image: (session?.user as any)?.image || null,
+            blueTickStatus: (session?.user as any)?.blue_tick_status || "NONE",
+            aura_percentage: (session?.user as any)?.aura_percentage || 50,
+          },
+          media: createdPost.attachmentId ? {
+            kind: createdPost.attachmentKind || "image",
+            url: `/api/media/stream?id=${createdPost.attachmentId}`,
+          } : null,
+        };
+
+        setIdConsolePosts((prev) => [optimisticPost, ...(prev || []).filter((p) => p.id !== optimisticPost.id)]);
+        if (postAudience === "GLOBAL" || postAudience === "ALL") {
+          setDirectoryGlobalPosts((prev) => [optimisticPost, ...(prev || []).filter((p) => p.id !== optimisticPost.id)]);
+        }
+      }
+
       await fetchIdConsolePosts();
       if (postAudience === "GLOBAL" || postAudience === "ALL") {
         await fetchDirectoryLatestPosts();
@@ -7181,6 +7215,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
   // Keep a stable ref of current UI states for seamless gesture/hardware back handling without effect re-binding
   const navStateRef = useRef({
     showDirectory,
+    showDirectoryMediaOnly,
     directoryProfileHandle,
     activePeerHandle,
     showSettings,
@@ -7196,6 +7231,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
 
   navStateRef.current = {
     showDirectory,
+    showDirectoryMediaOnly,
     directoryProfileHandle,
     activePeerHandle,
     showSettings,
@@ -7222,6 +7258,11 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       if (initialNav.handle) {
         setDirectoryProfileHandle(initialNav.handle);
       }
+      if (initialNav.tab === "feed" || initialNav.tab === "media") {
+        setShowDirectoryMediaOnly(true);
+      } else if (initialNav.tab === "ids") {
+        setShowDirectoryMediaOnly(false);
+      }
     } else if (initialNav.screen === "settings") {
       setShowSettings(true);
     } else if (initialNav.screen === "qai") {
@@ -7230,12 +7271,18 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       setIsNotifCenterOpen(true);
     } else if (initialNav.screen === "store") {
       setShowStore(true);
-    } else if (initialNav.screen === "idconsole") {
-      setShowIdConsole(true);
+    } else if (initialNav.screen === "idconsole" || initialNav.screen === "profile") {
+      const myHandle = (session?.user as any)?.handle;
+      if (initialNav.handle && myHandle && cleanHandle(initialNav.handle).toLowerCase() !== cleanHandle(myHandle).toLowerCase()) {
+        openUserProfile(initialNav.handle);
+      } else {
+        setShowIdConsole(true);
+        if (initialNav.tab === "global" || initialNav.tab === "my") {
+          setIdConsoleTab(initialNav.tab);
+        }
+      }
     } else if (initialNav.screen === "editprofile") {
       setShowEditProfileModal(true);
-    } else if (initialNav.screen === "profile" && initialNav.handle) {
-      setViewingProfileHandle(initialNav.handle);
     } else if (initialNav.screen === "chat" && initialNav.handle) {
       const myHandle = (session?.user as any)?.handle;
       if (!myHandle || cleanHandle(initialNav.handle).toLowerCase() !== cleanHandle(myHandle).toLowerCase()) {
@@ -7277,7 +7324,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       }
 
       // Priority 4: Global Quantum Directory Modal
-      if (current.showDirectory) {
+      if (current.showDirectory && !current.showIdConsole) {
         setShowDirectory(false);
         setDirectoryProfileHandle(null);
         setViewingProfileHandle(null);
@@ -7319,7 +7366,11 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       // Priority 9: ID Console
       if (current.showIdConsole) {
         setShowIdConsole(false);
-        replaceNavState({ screen: "home" });
+        if (current.showDirectory) {
+          replaceNavState({ screen: "directory", tab: current.showDirectoryMediaOnly ? "feed" : "ids" });
+        } else {
+          replaceNavState({ screen: "home" });
+        }
         return;
       }
 
@@ -7343,7 +7394,20 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
       const state = (e.state as QNavState) || parseCurrentNavState();
       if (state.screen === "directory") {
         setShowDirectory(true);
+        if (state.tab === "feed") setShowDirectoryMediaOnly(true);
+        else if (state.tab === "ids") setShowDirectoryMediaOnly(false);
         loadDirectoryData(false);
+        return;
+      } else if (state.screen === "idconsole" || state.screen === "profile") {
+        const myHandle = (session?.user as any)?.handle;
+        if (state.handle && myHandle && cleanHandle(state.handle).toLowerCase() !== cleanHandle(myHandle).toLowerCase()) {
+          openUserProfile(state.handle);
+        } else {
+          setShowIdConsole(true);
+          if (state.tab === "global" || state.tab === "my") {
+            setIdConsoleTab(state.tab);
+          }
+        }
         return;
       } else if (state.screen === "chat" && state.handle) {
         openChatWithPeer(state.handle);
@@ -9902,16 +9966,55 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                             </div>
                           )}
 
-                          <div className="space-y-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              {showDirectoryMediaOnly ? "Quantum Media Feed" : "All Quantum IDs"}
-                            </p>
+                          <div className="space-y-3">
+                            {/* Modern Apple/X Segmented Control: Global Feed vs Quantum IDs */}
+                            <div className="p-1 rounded-2xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-xl flex items-center gap-1 shadow-inner">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowDirectoryMediaOnly(true);
+                                  replaceNavState({ screen: "directory", tab: "feed" });
+                                  fetchDirectoryLatestPosts();
+                                }}
+                                className={`flex-1 py-1.5 px-3 rounded-xl text-[10.5px] sm:text-[11px] font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                                  showDirectoryMediaOnly
+                                    ? "bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 text-amber-200 border border-amber-400/80 shadow-[0_0_15px_rgba(245,158,11,0.3)] ring-1 ring-amber-400/30"
+                                    : "text-slate-400 hover:text-white hover:bg-white/[0.05]"
+                                }`}
+                              >
+                                <span className="relative flex h-2 w-2">
+                                  <span className={`absolute inline-flex h-full w-full rounded-full ${showDirectoryMediaOnly ? "bg-amber-400 opacity-75 animate-ping" : ""}`} />
+                                  <span className={`relative inline-flex h-2 w-2 rounded-full ${showDirectoryMediaOnly ? "bg-amber-300" : "bg-slate-500"}`} />
+                                </span>
+                                <span>🌐 Global Feed</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowDirectoryMediaOnly(false);
+                                  replaceNavState({ screen: "directory", tab: "ids" });
+                                }}
+                                className={`flex-1 py-1.5 px-3 rounded-xl text-[10.5px] sm:text-[11px] font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                                  !showDirectoryMediaOnly
+                                    ? "bg-gradient-to-r from-cyan-500/20 to-sky-500/20 text-cyan-200 border border-cyan-400/80 shadow-[0_0_15px_rgba(34,211,238,0.3)] ring-1 ring-cyan-400/30"
+                                    : "text-slate-400 hover:text-white hover:bg-white/[0.05]"
+                                }`}
+                              >
+                                <span className="relative flex h-2 w-2">
+                                  <span className={`absolute inline-flex h-full w-full rounded-full ${!showDirectoryMediaOnly ? "bg-cyan-400 opacity-75 animate-ping" : ""}`} />
+                                  <span className={`relative inline-flex h-2 w-2 rounded-full ${!showDirectoryMediaOnly ? "bg-cyan-300" : "bg-slate-500"}`} />
+                                </span>
+                                <span>👥 Quantum IDs</span>
+                              </button>
+                            </div>
+
                             <div className="flex gap-2">
                               <button
                                 type="button"
                                 onClick={() => {
                                   setIdConsoleTab("my");
                                   setShowIdConsole(true);
+                                  pushNavState({ screen: "idconsole", tab: "my" });
                                 }}
                                 className={`group relative flex-1 overflow-hidden rounded-2xl border px-2.5 sm:px-3 py-2 text-left text-[10.5px] sm:text-[11px] font-semibold transition focus-visible:outline-none ${
                                   isDefaultTheme
@@ -9953,7 +10056,12 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setShowDirectoryMediaOnly(!showDirectoryMediaOnly);
+                                  const nextVal = !showDirectoryMediaOnly;
+                                  setShowDirectoryMediaOnly(nextVal);
+                                  replaceNavState({ screen: "directory", tab: nextVal ? "feed" : "ids" });
+                                  if (nextVal) {
+                                    fetchDirectoryLatestPosts();
+                                  }
                                 }}
                                 className={`group relative flex-1 overflow-hidden rounded-2xl border px-3 py-2 text-left text-[11px] font-bold uppercase transition duration-300 active:scale-95 cursor-pointer ${showDirectoryMediaOnly
                                     ? "border-amber-400/85 bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-rose-500/15 text-amber-200 shadow-[0_0_15px_rgba(245,158,11,0.4)]"
@@ -10014,6 +10122,7 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                                     onClick={() => {
                                       setShowDirectoryMediaOnly(false);
                                       setMediaFilterTab('all');
+                                      replaceNavState({ screen: "directory", tab: "ids" });
                                     }}
                                     className="group flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/40 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition duration-300 hover:border-cyan-400/80 hover:bg-cyan-500/10 hover:text-cyan-200 active:scale-95 shadow-[0_0_15px_rgba(34,211,238,0.1)] cursor-pointer"
                                   >
@@ -12327,6 +12436,11 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                         setTimeout(() => {
                           setShowIdConsole(false);
                           setIsConsoleClosing(false);
+                          if (showDirectory) {
+                            replaceNavState({ screen: "directory", tab: showDirectoryMediaOnly ? "feed" : "ids" });
+                          } else {
+                            replaceNavState({ screen: "home" });
+                          }
                         }, 350);
                       }}
                       className="absolute right-3 top-3 z-50 flex h-9 w-9 items-center justify-center rounded-full border border-slate-600/70 bg-slate-900/90 text-slate-300 shadow-md transition hover:scale-105 hover:border-cyan-400/70 hover:bg-slate-800 hover:text-cyan-200 active:scale-95"
@@ -12440,7 +12554,10 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                     <div className="relative mt-5 p-1 rounded-2xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-xl flex items-center gap-1 max-w-xs shadow-inner">
                       <button
                         type="button"
-                        onClick={() => setIdConsoleTab("my")}
+                        onClick={() => {
+                          setIdConsoleTab("my");
+                          replaceNavState({ screen: "idconsole", tab: "my" });
+                        }}
                         className={`flex-1 py-1.5 px-4 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer active:scale-95 ${
                           idConsoleTab === "my"
                             ? "bg-white text-slate-950 shadow-[0_2px_10px_rgba(0,0,0,0.3)]"
@@ -12454,7 +12571,13 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setIdConsoleTab("global")}
+                        onClick={() => {
+                          setIdConsoleTab("global");
+                          replaceNavState({ screen: "idconsole", tab: "global" });
+                          if (directoryGlobalPosts.length === 0) {
+                            fetchDirectoryLatestPosts();
+                          }
+                        }}
                         className={`flex-1 py-1.5 px-4 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer active:scale-95 ${
                           idConsoleTab === "global"
                             ? "bg-white text-slate-950 shadow-[0_2px_10px_rgba(0,0,0,0.3)]"
@@ -12755,21 +12878,43 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                         <QuantumIdConsolePostsSkeleton />
                       ) : idConsolePostsError ? (
                         <p className="mt-2 text-[11px] text-rose-300">{idConsolePostsError}</p>
-                      ) : idConsolePosts && idConsolePosts.length ? (
-                        <div
-                          style={{ scrollbarGutter: "stable", overflowAnchor: "none" }}
-                          className="mt-3 space-y-3"
-                        >
-                          {idConsolePosts
+                      ) : (() => {
+                          const combined = idConsoleTab === "my"
+                            ? (idConsolePosts || []).filter((p) => p?.authorId === (session?.user as any)?.id)
+                            : [
+                                ...(idConsolePosts || []),
+                                ...directoryGlobalPosts.filter((dp) => !(idConsolePosts || []).some((cp) => cp.id === dp.id)),
+                              ];
+                          const visiblePosts = combined
                             .filter((p) => {
                               const hasText = typeof p?.text === "string" && p.text.trim().length > 0;
                               const hasMedia = Boolean(p?.media?.url || p?.attachment?.url || p?.attachmentId);
-                              if (!hasText && !hasMedia) return false;
-                              return idConsoleTab === "my"
-                                ? p?.authorId === (session?.user as any)?.id
-                                : true;
+                              return hasText || hasMedia;
                             })
-                            .map((p) => {
+                            .sort((a, b) => new Date(b?.createdAt || 0).getTime() - new Date(a?.createdAt || 0).getTime());
+
+                          if (visiblePosts.length === 0) {
+                            if (idConsolePosts === null) {
+                              return (
+                                <div className="mt-4 flex flex-col items-center justify-center gap-2 text-slate-500">
+                                  <div className="h-8 w-8 rounded-full border-2 border-slate-700/60 border-t-cyan-400 animate-spin" />
+                                  <p className="text-[11px]">Preparing your console…</p>
+                                </div>
+                              );
+                            }
+                            return (
+                              <p className="mt-2 text-[11px] text-slate-400">
+                                {idConsoleTab === "my" ? "No posts yet. Share your thoughts or media above!" : "No global posts yet."}
+                              </p>
+                            );
+                          }
+
+                          return (
+                            <div
+                              style={{ scrollbarGutter: "stable", overflowAnchor: "none" }}
+                              className="mt-3 space-y-3"
+                            >
+                              {visiblePosts.map((p) => {
                               return (
                                 <div
                                   key={p.id}
@@ -13024,16 +13169,10 @@ function HomeInner({ passiveTouchRef, androidScrollRef }: {
                                   )}
                                 </div>
                               );
-                            })}
-                        </div>
-                      ) : idConsolePosts === null ? (
-                        <div className="mt-4 flex flex-col items-center justify-center gap-2 text-slate-500">
-                          <div className="h-8 w-8 rounded-full border-2 border-slate-700/60 border-t-cyan-400 animate-spin" />
-                          <p className="text-[11px]">Preparing your console…</p>
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-[11px] text-slate-400">No posts yet.</p>
-                      )}
+                              })}
+                            </div>
+                          );
+                        })()}
                     </div>
 
                     {/* Edit Profile Modal */}

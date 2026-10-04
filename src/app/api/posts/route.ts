@@ -58,7 +58,12 @@ async function getSignedMediaUrl(params: { bucket: string; objectKey: string; id
 
 export async function GET(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    let session: any = null;
+    try {
+      session = await getServerSession(authOptions);
+    } catch {
+      // Public / guest / unauthenticated directory request
+    }
     const meId = (session?.user as any)?.id as string | undefined;
 
     const url = new URL(request.url);
@@ -135,7 +140,6 @@ export async function GET(request: Request) {
 
           const att = attachmentById.get(p.attachmentId as string);
           if (!att || !att.bucket || !att.objectKey) {
-            prisma.post.update({ where: { id: p.id }, data: { attachmentId: null, attachmentKind: null } }).catch(() => {});
             return { ...p, media: null, attachmentId: null, attachmentKind: null };
           }
 
@@ -173,17 +177,11 @@ export async function GET(request: Request) {
         }),
       );
 
-      // Filter out ghost/empty posts that have neither non-empty text nor media
+      // Filter displayable posts (must have text or an attachment/media)
       const validDirectoryPosts = postsWithMedia.filter((p: any) => {
         const hasText = typeof p?.text === "string" && p.text.trim().length > 0;
-        const hasMedia = Boolean(p?.media?.url);
-        if (!hasText && !hasMedia) {
-          if (p?.id) {
-            (prisma as any).post.delete({ where: { id: p.id } }).catch(() => {});
-          }
-          return false;
-        }
-        return true;
+        const hasMedia = Boolean(p?.media?.url || p?.attachmentId);
+        return hasText || hasMedia;
       });
 
       let sortedDirectoryPosts = validDirectoryPosts;
@@ -373,17 +371,11 @@ export async function GET(request: Request) {
       }),
     );
 
-    // Filter out ghost/empty posts that have neither non-empty text nor media
+    // Filter displayable posts (must have text or an attachment/media)
     const validPostsWithMedia = postsWithMedia.filter((p: any) => {
       const hasText = typeof p?.text === "string" && p.text.trim().length > 0;
-      const hasMedia = Boolean(p?.media?.url);
-      if (!hasText && !hasMedia) {
-        if (p?.id) {
-          (prisma as any).post.delete({ where: { id: p.id } }).catch(() => {});
-        }
-        return false;
-      }
-      return true;
+      const hasMedia = Boolean(p?.media?.url || p?.attachmentId);
+      return hasText || hasMedia;
     });
 
     let finalPosts = validPostsWithMedia;
